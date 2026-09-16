@@ -268,58 +268,91 @@ healthcheck HTTP pointe sur `/api/health`, qui vérifie l'application **et** Pos
 
 #### Option B — Railway (par CLI)
 
-Procédure vérifiée avec le CLI Railway **5.57.2**.
+**Procédure réellement exécutée** avec le CLI Railway **5.57.2**. Chaque commande
+ci-dessous a servi au déploiement en production documenté au §13.
+
+**1. Projet et base**
 
 ```bash
 npm install -g @railway/cli
 railway login                 # ouvre le navigateur (action humaine obligatoire)
-railway init                  # cree le projet
+railway init --name kiraa
 railway add --database postgres
 ```
 
-Variables du service applicatif. `DATABASE_URL` est une **référence** vers le service
-Postgres : elle résout vers le réseau privé de Railway, jamais vers `localhost`.
+Railway provisionne `ghcr.io/railwayapp-templates/postgres-ssl:18`, avec un volume
+persistant. **pgvector y est déjà installé** (vérifié : version 0.8.6 sur
+PostgreSQL 18.6) — aucune image personnalisée n'est nécessaire.
+
+**2. Accès à la base depuis un poste local**
+
+Le service Postgres n'expose **aucune** `DATABASE_PUBLIC_URL` par défaut : sa
+`DATABASE_URL` pointe vers `postgres.railway.internal`, injoignable hors du réseau
+Railway. Il faut créer explicitement un proxy TCP :
 
 ```bash
-railway variables set \
-  LLM_PROVIDER=groq \
-  EMBEDDINGS_PROVIDER=local \
-  EMBEDDINGS_MODEL=Xenova/all-MiniLM-L6-v2 \
-  EMBEDDINGS_DIMENSION=384 \
-  HOSTNAME=0.0.0.0 \
-  'DATABASE_URL=${{Postgres.DATABASE_URL}}'
+railway tcp-proxy create --port 5432 --service Postgres
+# -> renvoie un endpoint public, ex. sakura.proxy.rlwy.net:36091
+```
 
-# La cle API est lue sur stdin : elle n'apparait ni dans la ligne de commande,
-# ni dans l'historique du shell, ni dans les journaux du terminal.
-railway variables set LLM_API_KEY --stdin
+Reconstituer l'URL à partir des variables du service (elle contient un mot de
+passe : ne jamais la committer) :
+
+```bash
+railway variables --service Postgres --kv | grep -E '^PG(USER|PASSWORD|DATABASE)='
+# postgresql://<PGUSER>:<PGPASSWORD>@<endpoint-du-proxy>/<PGDATABASE>
+```
+
+**3. Migrations et données — AVANT la mise en service** (cahier §9.3)
+
+```bash
+DATABASE_URL="<url-du-proxy>" npm run deploy:init
+```
+
+Enchaîne migrations → seed → indexation RAG. Idempotent. Attendu : 50 véhicules,
+20 clients, 25 réservations, 60 lignes saisonnières, 20 fragments RAG.
+
+**4. Service applicatif**
+
+Depuis le dépôt GitHub (redéploiement automatique à chaque `push`) :
+
+```bash
+railway add --repo <utilisateur>/<depot> --branch main --service kiraa-app \
+  -v "LLM_PROVIDER=groq" \
+  -v "LLM_MODEL=qwen/qwen3.8-27b" \
+  -v "EMBEDDINGS_PROVIDER=local" \
+  -v "EMBEDDINGS_MODEL=Xenova/all-MiniLM-L6-v2" \
+  -v "EMBEDDINGS_DIMENSION=384" \
+  -v "MAX_UPLOAD_SIZE_MB=10" \
+  -v "OCR_CONFIDENCE_THRESHOLD=0.85" \
+  -v "HOSTNAME=0.0.0.0" \
+  -v "PORT=3000" \
+  -v 'DATABASE_URL=${{Postgres.DATABASE_URL}}'
+
+# Cle API lue sur stdin : absente de la ligne de commande et de l'historique.
+railway variables set LLM_API_KEY --stdin --service kiraa-app
 ```
 
 > `railway variables --set "K=V"` est la **forme héritée** : le CLI actuel attend
 > `railway variables set K=V`.
 
-```bash
-railway up                    # construit et deploie le Dockerfile
-```
+> **`PORT=3000` est obligatoire.** Railway injecte `PORT=8080`, qui écrase le
+> `ENV PORT=3000` du Dockerfile : l'application écoute alors sur 8080 tandis que le
+> domaine et le `HEALTHCHECK` visent 3000, et le routeur renvoie **HTTP 502**.
+> Fixer `PORT=3000` aligne l'application, le domaine et le healthcheck.
 
-Initialisation de la base, **une seule fois**, depuis un poste disposant de Node.js.
-`railway run` injecte les variables du projet, dont `DATABASE_URL` qui pointe vers
-`*.railway.internal` — un hôte **injoignable depuis votre machine**. Il faut donc
-utiliser explicitement l'URL publique du service Postgres :
+**5. Domaine HTTPS**
 
 ```bash
-# Recuperer l'URL publique (elle contient un mot de passe : ne pas la committer)
-railway variables --service Postgres --kv | grep DATABASE_PUBLIC_URL
-
-# Puis initialiser avec cette URL
-DATABASE_URL="<DATABASE_PUBLIC_URL>" npm run deploy:init
-```
-
-```bash
-railway domain                # genere l'URL HTTPS publique
-railway logs                  # verifier le demarrage
+railway domain --service kiraa-app --port 3000
+railway domain list --service kiraa-app
+railway logs --service kiraa-app
 ```
 
 Vérifier enfin `https://<service>.up.railway.app/api/health` → `status: healthy`.
+
+En alternative au dépôt GitHub, `railway up` téléverse le dossier courant
+(`.dockerignore` exclut `.env*`, la clé ne part donc jamais dans l'image).
 
 #### Points de vigilance
 
@@ -338,10 +371,16 @@ Vérifier enfin `https://<service>.up.railway.app/api/health` → `status: healt
   inactivité (premier appel lent) et une base gratuite a une durée de vie limitée.
   Vérifier l'offre au moment de la démonstration.
 
-> **État actuel : le déploiement distant n'a pas encore été exécuté.** Les blueprints,
-> le healthcheck, le script d'initialisation et la procédure ci-dessus sont prêts et
-> versionnés, mais **aucune URL HTTPS publique n'est active à ce jour** et aucune des
-> deux options n'a été validée en conditions réelles.
+> **État actuel : le déploiement distant est actif sur Railway.**
+>
+> - **URL publique** : https://kiraa-app-production.up.railway.app
+> - **Healthcheck** : https://kiraa-app-production.up.railway.app/api/health
+> - **Base** : PostgreSQL 18.6, pgvector 0.8.6, volume persistant de 500 Mo, région `sfo`
+> - **Source** : dépôt GitHub `lberniilyas/car-rental`, branche `main` — chaque `push`
+>   déclenche un redéploiement
+>
+> L'option Render (§ Option A) reste écrite et versionnée mais **n'a pas été exécutée** :
+> une seule des deux options est nécessaire.
 
 ### 9.3 Protection du seed
 
@@ -441,4 +480,8 @@ Le nom du dépôt et le format de remise sont communiqués par l'encadrement
 | Interface Next.js | ✅ accessible sur http://localhost:3000 |
 | Génération du devis PDF | ✅ |
 | Secrets dans le dépôt | ✅ aucun |
-| **Déploiement distant HTTPS** | ❌ **non réalisé** |
+| **Déploiement distant HTTPS** | ✅ https://kiraa-app-production.up.railway.app |
+| Base distante — pgvector + volume persistant | ✅ PostgreSQL 18.6, pgvector 0.8.6 |
+| Checkpoints LangGraph en production | ✅ 4 tables créées, 7 checkpoints persistés |
+| OCR en conteneur | ✅ vérifié en production, confiance 0,93 |
+| Quota LLM (Groq) | ⚠️ **épuisé** — réponses dégradées jusqu'à réinitialisation |
