@@ -1,0 +1,51 @@
+vehicle_id,make,model,year,category,transmission,fuel_type,base_daily_rate,vehicles_available,location
+VH-0001,Mercedes-Benz,E-Class,2011,Compact,automatic,GASOLINE,740,2,Agadir
+VH-0002,Audi,A7,2014,Compact,manual,GASOLINE,900,2,Fès
+VH-0003,Chevrolet,Camaro,2010,Compact,manual,GASOLINE,680,4,Casablanca
+VH-0004,Ford,Fusion Hybrid,2017,Compact,automatic,HYBRID,640,2,Tanger
+VH-0005,Mercedes-Benz,S-Class,2010,Compact,automatic,GASOLINE,690,2,Rabat
+VH-0006,Audi,A5 Sportback,2019,Compact,automatic,GASOLINE,720,4,Agadir
+VH-0007,Ford,Mustang,2017,Compact,automatic,GASOLINE,690,4,Fès
+VH-0008,Lexus,IS 200t,2017,Compact,manual,GASOLINE,790,1,Casablanca
+VH-0009,Audi,S5,2015,Compact,manual,GASOLINE,870,5,Rabat
+VH-0010,Mazda,MX-5 Miata,2016,Compact,manual,GASOLINE,700,5,Rabat
+VH-0011,Hyundai,Ioniq Hybrid,2019,Economy,automatic,HYBRID,360,2,Marrakech
+VH-0012,Dodge,Grand Caravan,2012,Economy,manual,GASOLINE,340,5,Tanger
+VH-0013,Ford,Mustang,2013,Economy,manual,GASOLINE,560,2,Fès
+VH-0014,Chrysler,Sebring,2009,Economy,automatic,GASOLINE,350,1,Casablanca
+VH-0015,Hyundai,Sonata,2019,Economy,automatic,GASOLINE,380,4,Marrakech
+VH-0016,Lincoln,MKS,2011,Economy,automatic,GASOLINE,450,4,Tanger
+VH-0017,Lexus,CT 200h,2011,Economy,automatic,HYBRID,520,4,Marrakech
+VH-0018,FIAT,500,2017,Economy,automatic,GASOLINE,400,5,Agadir
+VH-0019,Kia,Rio,2013,Economy,automatic,GASOLINE,280,1,Tanger
+VH-0020,Toyota,Prius,2014,Economy,automatic,HYBRID,390,5,Tanger
+VH-0021,Porsche,Panamera,2017,Premium,manual,GASOLINE,1350,5,Fès
+VH-0022,Jaguar,XK-Series,2001,Premium,automatic,GASOLINE,1990,1,Tanger
+VH-0023,Bentley,Continental Flying Spur,2009,Premium,automatic,GASOLINE,2500,1,Marrakech
+VH-0024,BMW,i8,2016,Premium,automatic,HYBRID,2490,1,Tanger
+VH-0025,Porsche,Boxster,2015,Premium,automatic,GASOLINE,1390,1,Fès
+VH-0026,Aston Martin,V8 Vantage,2013,Premium,manual,GASOLINE,12000,4,Fès
+VH-0027,BMW,4-Series,2020,Premium,automatic,GASOLINE,1450,3,Agadir
+VH-0028,Rolls Royce,Ghost,2011,Premium,automatic,GASOLINE,10500,3,Marrakech
+VH-0029,Tesla,Model 3,2019,Premium,automatic,ELECTRIC,1200,1,Rabat
+VH-0030,Bentley,Flying Spur,2018,Premium,automatic,GASOLINE,2950,3,Rabat
+VH-0031,Toyota,RAV4,2017,SUV,manual,GASOLINE,520,3,Tanger
+VH-0032,Jeep,Renegade,2019,SUV,automatic,GASOLINE,440,1,Agadir
+VH-0033,BMW,X4,2016,SUV,automatic,GASOLINE,890,3,Casablanca
+VH-0034,Kia,Sportage,2017,SUV,manual,GASOLINE,620,5,Tanger
+VH-0035,Cadillac,Escalade,2016,SUV,manual,GASOLINE,1600,2,Agadir
+VH-0036,Jeep,Wrangler,2014,SUV,manual,GASOLINE,780,2,Marrakech
+VH-0037,Honda,Pilot,2009,SUV,automatic,GASOLINE,620,1,Marrakech
+VH-0038,Dodge,Durango,2015,SUV,automatic,GASOLINE,640,4,Marrakech
+VH-0039,Subaru,XV Crosstrek,2013,SUV,manual,GASOLINE,600,1,Marrakech
+VH-0040,Land Rover,Range Rover,2013,SUV,automatic,GASOLINE,1600,4,Marrakech
+VH-0041,Ram,1500,2014,Utility,automatic,GASOLINE,750,2,Agadir
+VH-0042,Chevrolet,Express,2014,Utility,automatic,GASOLINE,820,1,Agadir
+VH-0043,Ford,F-450 Super Duty,2015,Utility,automatic,DIESEL,750,5,Fès
+VH-0044,Mercedes-Benz,Sprinter,2018,Utility,manual,DIESEL,2160,3,Rabat
+VH-0045,Chevrolet,Silverado 1500,2009,Utility,automatic,GASOLINE,420,4,Marrakech
+VH-0046,Ford,Transit Wagon,2016,Utility,manual,GASOLINE,1990,3,Casablanca
+VH-0047,Mercedes-benz,Sprinter,2019,Utility,automatic,DIESEL,1300,3,Agadir
+VH-0048,Jeep,Gladiator,2020,Utility,automatic,GASOLINE,860,1,Casablanca
+VH-0049,Ford,Transit Wagon,2018,Utility,automatic,GASOLINE,1520,3,Casablanca
+VH-0050,Chevrolet,Silverado 1500,2012,Utility,automatic,GASOLINE,380,5,Casablanca

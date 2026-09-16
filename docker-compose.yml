@@ -1,0 +1,74 @@
+# ==========================================================================
+# Kiraa — orchestration locale reproductible (EX-09, cahier des charges §9.2)
+#
+#   - PostgreSQL 17 avec l'extension pgvector preinstallee
+#   - volume persistant, reseau interne, healthchecks sur les deux services
+#   - redemarrage automatique apres echec
+#
+# Port hote 5433 : le port 5432 est deja occupe par une installation
+# PostgreSQL native sous Windows. A l'interieur du reseau Docker, les
+# services communiquent normalement sur 5432.
+# ==========================================================================
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: kiraa-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kiraa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kiraa_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-kiraa}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - kiraa_pgdata:/var/lib/postgresql/data
+    networks:
+      - kiraa_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kiraa} -d ${POSTGRES_DB:-kiraa}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kiraa-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Secrets locaux : jamais dans le depot. Absent en CI -> required: false.
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kiraa}:${POSTGRES_PASSWORD:-kiraa_dev}@db:5432/${POSTGRES_DB:-kiraa}
+      # LLM_API_KEY, LLM_MODEL et les variables EMBEDDINGS_* proviennent de
+      # `env_file` ci-dessus. On ne les redeclare PAS ici : la section
+      # `environment` est prioritaire sur `env_file` et ecraserait la cle par
+      # une valeur vide. DATABASE_URL reste explicite, car la valeur locale
+      # (localhost:5433) n'est pas valable a l'interieur du reseau Docker.
+      NODE_ENV: production
+      PORT: 3000
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    networks:
+      - kiraa_net
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  kiraa_pgdata:
+    driver: local
+
+networks:
+  kiraa_net:
+    driver: bridge

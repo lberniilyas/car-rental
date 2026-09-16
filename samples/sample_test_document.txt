@@ -1,0 +1,9 @@
+Customer name: Test User
+National ID: AB123456
+Driving licence number: D987654321
+Date of birth: 1990-01-01
+Requested vehicle category: Premium
+Rental start date: 2026-07-25
+Rental end date: 2026-07-28
+Insurance option: allrisk
+Customer message: Please verify my eligibility and tell me whether human review is needed.

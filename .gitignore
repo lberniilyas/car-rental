@@ -1,0 +1,39 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Secrets — jamais dans le dépôt (cahier des charges §9, grille d'évaluation)
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Logs
+npm-debug.log*
+yarn-error.log*
+*.log
+
+# Tests / couverture
+coverage/
+.vitest/
+
+# Rapports générés au runtime
+/tmp/
+/uploads/
+/generated/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.tsbuildinfo
+next-env.d.ts
+
+# Modeles de langue tesseract telecharges au runtime (regenerables)
+*.traineddata
+
+# Cache des modeles d'embeddings
+.cache/

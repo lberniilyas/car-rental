@@ -1,0 +1,9 @@
+{
+    "first_name": "Test",
+    "last_name": "User",
+    "id_number": "AB123456",
+    "license_number": "D987654321",
+    "date_of_birth": "1990-01-01",
+    "nationality": "Moroccan",
+    "address": "123 Sample Street, Casablanca"
+}
