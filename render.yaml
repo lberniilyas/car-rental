@@ -1,0 +1,69 @@
+# ==========================================================================
+# Blueprint Render — deploiement distant de demonstration.
+#
+# Deploie deux composants :
+#   - un service web conteneurise (Dockerfile du depot) ;
+#   - une base PostgreSQL persistante, sur laquelle l'extension pgvector est
+#     activee par la migration (`CREATE EXTENSION IF NOT EXISTS vector`).
+#
+# Les valeurs marquees `sync: false` ne sont JAMAIS stockees dans le depot :
+# elles sont saisies dans le gestionnaire de secrets de Render.
+# ==========================================================================
+
+services:
+  - type: web
+    name: kiraa-app
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: frankfurt
+    branch: main
+    # Healthcheck HTTP : verifie l'application ET la connexion PostgreSQL.
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kiraa-db
+          property: connectionString
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      # Next.js standalone ecoute sur $HOSTNAME : forcer toutes les interfaces.
+      - key: HOSTNAME
+        value: 0.0.0.0
+      - key: LLM_PROVIDER
+        value: groq
+      - key: LLM_MODEL
+        value: qwen/qwen3.8-27b
+      - key: LLM_TEMPERATURE
+        value: 0
+      - key: LLM_TIMEOUT_SECONDS
+        value: 30
+      # Embeddings executes localement : aucune cle API requise.
+      - key: EMBEDDINGS_PROVIDER
+        value: local
+      - key: EMBEDDINGS_MODEL
+        value: Xenova/all-MiniLM-L6-v2
+      - key: EMBEDDINGS_DIMENSION
+        value: 384
+      - key: TRANSFORMERS_CACHE
+        value: /app/.cache
+      - key: MAX_UPLOAD_SIZE_MB
+        value: 10
+      - key: OCR_CONFIDENCE_THRESHOLD
+        value: 0.85
+      # --- Secrets : saisis dans le dashboard, jamais dans le depot ---------
+      - key: LLM_API_KEY
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+
+databases:
+  - name: kiraa-db
+    databaseName: kiraa
+    user: kiraa
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: "16"

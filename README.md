@@ -238,28 +238,66 @@ Copier `.env.example` vers `.env.local` (ignoré par git) et renseigner les vale
 
 ### 9.2 Mode distant de démonstration
 
-Procédure :
+Deux blueprints sont fournis dans le dépôt. **Un seul est nécessaire.**
 
-1. Construire une image versionnée : `docker build -t kiraa:<version> .`
-2. Publier l'image dans l'environnement d'hébergement.
-3. Provisionner un PostgreSQL **persistant et compatible pgvector**.
-4. Renseigner les variables dans le **gestionnaire de secrets** de l'hébergeur
-   (jamais en dur dans l'image).
-5. Appliquer les migrations **avant** la mise en service : `npm run db:migrate`.
-6. Exécuter le seed contrôlé : `npm run db:seed` puis `npm run rag:index`.
-7. Démarrer l'application, vérifier `/api/health` (app **et** PostgreSQL).
-8. Activer l'URL HTTPS publique et communiquer les accès.
+| Fichier | Hébergeur | CLI |
+|---|---|---|
+| `render.yaml` | Render | déploiement par blueprint, aucun CLI requis |
+| `railway.json` | Railway | `npm i -g @railway/cli` |
 
-Exigences : URL HTTPS, base persistante pgvector, secrets protégés, journaux sans clés,
-healthcheck HTTP, contrôle de santé PostgreSQL, redémarrage automatique, limitation des
-téléversements, routes d'administration protégées.
+Dans les deux cas, l'image est construite à partir du `Dockerfile` du dépôt et le
+healthcheck HTTP pointe sur `/api/health`, qui vérifie l'application **et** PostgreSQL.
 
-Hébergeurs possibles : Railway, Render ou un VPS Docker. Aucun n'est imposé ; le choix
-doit être documenté ici (fournisseur, limites, persistance, support pgvector, mode Docker,
-coût, DNS, HTTPS, URL publique).
+#### Option A — Render (par blueprint)
 
-> **État actuel : le déploiement distant n'a pas encore été réalisé.** L'ensemble des
-> étapes ci-dessus est prêt, mais aucune URL HTTPS publique n'est active à ce jour.
+1. Sur https://dashboard.render.com → **New** → **Blueprint**.
+2. Connecter le dépôt GitHub `car-rental`. Render lit `render.yaml` et crée les deux
+   composants : le service web `kiraa-app` et la base `kiraa-db`.
+3. Renseigner les secrets marqués `sync: false` dans le dashboard :
+   `LLM_API_KEY` et, si les routes d'administration sont utilisées, `ADMIN_TOKEN`.
+   `DATABASE_URL` est injectée automatiquement depuis la base.
+4. Initialiser la base **une seule fois**, depuis un poste disposant de Node.js, en
+   utilisant l'URL de connexion externe fournie par Render :
+
+   ```bash
+   DATABASE_URL="<external-connection-string>" npm run deploy:init
+   ```
+
+   Ce script enchaîne migrations → seed → indexation RAG. Il est idempotent.
+5. Vérifier `https://<service>.onrender.com/api/health` → `status: healthy`.
+
+#### Option B — Railway (par CLI)
+
+```bash
+npm install -g @railway/cli
+railway login                 # ouvre le navigateur
+railway init                  # cree le projet
+railway add --database postgres
+railway variables --set "LLM_API_KEY=<votre-cle>"                   --set "EMBEDDINGS_PROVIDER=local"                   --set "EMBEDDINGS_MODEL=Xenova/all-MiniLM-L6-v2"                   --set "EMBEDDINGS_DIMENSION=384"                   --set "HOSTNAME=0.0.0.0"
+railway up                    # construit et deploie le Dockerfile
+railway run npm run deploy:init
+railway domain                # genere l'URL HTTPS publique
+```
+
+#### Points de vigilance
+
+- **pgvector.** La migration exécute `CREATE EXTENSION IF NOT EXISTS vector`. L'extension
+  doit être disponible côté hébergeur. Render et Railway la proposent sur leurs offres
+  PostgreSQL managées ; si l'extension est absente, déployer à la place l'image
+  `pgvector/pgvector:pg17` comme service de base de données dédié.
+- **`HOSTNAME=0.0.0.0` est obligatoire.** La sortie `standalone` de Next.js écoute sur
+  `$HOSTNAME` ; sans cette variable, le service n'est joignable ni par le healthcheck ni
+  par le routeur de l'hébergeur.
+- **Premier démarrage plus lent.** Le modèle d'embeddings (~90 Mo) est téléchargé au
+  premier appel du RAG et mis en cache dans `TRANSFORMERS_CACHE`.
+- **Offres gratuites.** Sur Render, un service web gratuit se met en veille après
+  inactivité (premier appel lent) et une base gratuite a une durée de vie limitée.
+  Vérifier l'offre au moment de la démonstration.
+
+> **État actuel : le déploiement distant n'a pas encore été exécuté.** Les blueprints,
+> le healthcheck, le script d'initialisation et la procédure ci-dessus sont prêts et
+> versionnés, mais **aucune URL HTTPS publique n'est active à ce jour** et aucune des
+> deux options n'a été validée en conditions réelles.
 
 ### 9.3 Protection du seed
 

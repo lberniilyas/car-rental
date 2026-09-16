@@ -18,7 +18,8 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:e2e": "vitest run tests/e2e",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "deploy:init": "npm run db:migrate && npm run db:seed && npm run rag:index"
   },
   "dependencies": {
     "@langchain/core": "^0.3.26",
