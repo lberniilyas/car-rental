@@ -55,9 +55,37 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/data ./data
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
 
+# ─── OCR : tesseract.js ───────────────────────────────────────────────────
+# Le tracage `standalone` de Next.js ne copie que les fichiers qu'il detecte
+# statiquement. Les binaires WASM de tesseract.js-core sont charges a
+# l'execution : ils sont donc ABSENTS de la sortie standalone, et l'OCR
+# echoue par `ENOENT ... tesseract-core-simd.wasm`. On recopie le paquet
+# complet depuis l'etape `deps`. Ne pas supprimer cette ligne.
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/tesseract.js-core \
+  ./node_modules/tesseract.js-core
+
 # Cache des modeles d'embeddings, inscriptible par l'utilisateur applicatif.
-RUN mkdir -p /app/.cache && chown -R nextjs:nodejs /app/.cache
+# /app appartient a root : sans repertoire dedie inscriptible, tesseract.js ne
+# peut pas ecrire les `.traineddata` qu'il telecharge (son cachePath par
+# defaut est './').
+RUN mkdir -p /app/.cache/tessdata && chown -R nextjs:nodejs /app/.cache
 ENV TRANSFORMERS_CACHE=/app/.cache
+ENV TESSDATA_CACHE_PATH=/app/.cache/tessdata
+
+# Pre-chargement des donnees de langue OCR, pour que la premiere reconnaissance
+# ne depende ni du reseau ni d'un delai de telechargement. Best-effort : si le
+# CDN est injoignable au build, tesseract.js les telechargera a l'execution
+# dans TESSDATA_CACHE_PATH, qui est inscriptible.
+RUN node -e "\
+const {createGunzip}=require('zlib');const fs=require('fs');const {pipeline}=require('stream/promises');\
+const base='https://tessdata.projectnaptha.com/4.0.0';\
+(async()=>{for(const l of ['eng','fra']){\
+  const r=await fetch(\`\${base}/\${l}.traineddata.gz\`);\
+  if(!r.ok) throw new Error(l+' HTTP '+r.status);\
+  await pipeline(require('stream').Readable.fromWeb(r.body),createGunzip(),fs.createWriteStream(\`/app/.cache/tessdata/\${l}.traineddata\`));\
+  console.log('tessdata '+l+' OK');\
+}})().catch(e=>{console.warn('tessdata prefetch ignore : '+e.message);});\
+" && chown -R nextjs:nodejs /app/.cache
 
 USER nextjs
 EXPOSE 3000

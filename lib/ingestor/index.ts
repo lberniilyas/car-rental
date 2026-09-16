@@ -108,7 +108,13 @@ export async function runOcr(
   languages = 'eng+fra',
 ): Promise<{ text: string; confidence: number }> {
   const { createWorker } = await import('tesseract.js');
-  const worker = await createWorker(languages);
+
+  // En conteneur, /app appartient a root : le cachePath par defaut de
+  // tesseract.js ('./') n'y est pas inscriptible et le telechargement des
+  // `.traineddata` echoue. TESSDATA_CACHE_PATH pointe vers un repertoire
+  // dedie. Hors conteneur la variable est absente : comportement inchange.
+  const cachePath = process.env.TESSDATA_CACHE_PATH;
+  const worker = await createWorker(languages, undefined, cachePath ? { cachePath } : undefined);
   try {
     const { data } = await worker.recognize(buffer);
     return {

@@ -268,23 +268,67 @@ healthcheck HTTP pointe sur `/api/health`, qui vérifie l'application **et** Pos
 
 #### Option B — Railway (par CLI)
 
+Procédure vérifiée avec le CLI Railway **5.57.2**.
+
 ```bash
 npm install -g @railway/cli
-railway login                 # ouvre le navigateur
+railway login                 # ouvre le navigateur (action humaine obligatoire)
 railway init                  # cree le projet
 railway add --database postgres
-railway variables --set "LLM_API_KEY=<votre-cle>"                   --set "EMBEDDINGS_PROVIDER=local"                   --set "EMBEDDINGS_MODEL=Xenova/all-MiniLM-L6-v2"                   --set "EMBEDDINGS_DIMENSION=384"                   --set "HOSTNAME=0.0.0.0"
-railway up                    # construit et deploie le Dockerfile
-railway run npm run deploy:init
-railway domain                # genere l'URL HTTPS publique
 ```
+
+Variables du service applicatif. `DATABASE_URL` est une **référence** vers le service
+Postgres : elle résout vers le réseau privé de Railway, jamais vers `localhost`.
+
+```bash
+railway variables set \
+  LLM_PROVIDER=groq \
+  EMBEDDINGS_PROVIDER=local \
+  EMBEDDINGS_MODEL=Xenova/all-MiniLM-L6-v2 \
+  EMBEDDINGS_DIMENSION=384 \
+  HOSTNAME=0.0.0.0 \
+  'DATABASE_URL=${{Postgres.DATABASE_URL}}'
+
+# La cle API est lue sur stdin : elle n'apparait ni dans la ligne de commande,
+# ni dans l'historique du shell, ni dans les journaux du terminal.
+railway variables set LLM_API_KEY --stdin
+```
+
+> `railway variables --set "K=V"` est la **forme héritée** : le CLI actuel attend
+> `railway variables set K=V`.
+
+```bash
+railway up                    # construit et deploie le Dockerfile
+```
+
+Initialisation de la base, **une seule fois**, depuis un poste disposant de Node.js.
+`railway run` injecte les variables du projet, dont `DATABASE_URL` qui pointe vers
+`*.railway.internal` — un hôte **injoignable depuis votre machine**. Il faut donc
+utiliser explicitement l'URL publique du service Postgres :
+
+```bash
+# Recuperer l'URL publique (elle contient un mot de passe : ne pas la committer)
+railway variables --service Postgres --kv | grep DATABASE_PUBLIC_URL
+
+# Puis initialiser avec cette URL
+DATABASE_URL="<DATABASE_PUBLIC_URL>" npm run deploy:init
+```
+
+```bash
+railway domain                # genere l'URL HTTPS publique
+railway logs                  # verifier le demarrage
+```
+
+Vérifier enfin `https://<service>.up.railway.app/api/health` → `status: healthy`.
 
 #### Points de vigilance
 
 - **pgvector.** La migration exécute `CREATE EXTENSION IF NOT EXISTS vector`. L'extension
-  doit être disponible côté hébergeur. Render et Railway la proposent sur leurs offres
-  PostgreSQL managées ; si l'extension est absente, déployer à la place l'image
-  `pgvector/pgvector:pg17` comme service de base de données dédié.
+  doit être disponible côté hébergeur. Railway propose des modèles PostgreSQL avec
+  pgvector préinstallé ; si `CREATE EXTENSION` échoue sur la base provisionnée par
+  `railway add --database postgres`, remplacer ce service par l'image dédiée :
+  `railway add --image pgvector/pgvector:pg17`. Vérification directe :
+  `railway connect Postgres` puis `CREATE EXTENSION IF NOT EXISTS vector;`.
 - **`HOSTNAME=0.0.0.0` est obligatoire.** La sortie `standalone` de Next.js écoute sur
   `$HOSTNAME` ; sans cette variable, le service n'est joignable ni par le healthcheck ni
   par le routeur de l'hébergeur.
