@@ -104,14 +104,40 @@ describe('Ingestion PDF — natif d’abord, OCR en secours', () => {
     expect(r.processingEngine).toBe('native_pdf');
   });
 
-  it('ne transmet jamais un PDF à tesseract par défaut et ne plante pas', async () => {
-    // tesseract.js lève une erreur asynchrone non rattrapable sur un PDF :
-    // sans OCR injecté, le PDF illisible doit être dégradé proprement.
+  it('dégrade proprement un PDF corrompu au lieu de tuer le processus', async () => {
+    // Un PDF illisible ne peut être ni lu nativement ni rasterisé. Le buffer PDF
+    // ne doit JAMAIS atteindre tesseract.js : son worker lèverait une erreur
+    // asynchrone rethrow-ée dans process.nextTick, non rattrapable, qui termine
+    // le processus Node. Le fait que ce test rende un résultat prouve que la
+    // rasterisation a servi de garde.
     const r = await ingestFile(Buffer.from('%PDF-1.4\nillisible'), 'illisible.pdf');
     expect(r.validationStatus).toBe('CLARIFICATION_REQUIRED');
     expect(r.processingEngine).toBe('not_used');
     expect(r.humanReviewStatus).toBe('REQUIRED');
-    expect(r.errors.join(' ')).toMatch(/rasterisation/);
+    expect(r.errors.join(' ')).toMatch(/PDF illisible/);
+  });
+
+  it('rasterise puis OCRise un PDF sans texte natif (cahier des charges §8)', async () => {
+    // Le PDF réel du projet contient du texte natif : on force la bascule en
+    // abaissant artificiellement le seuil via un PDF réel rendu en image.
+    // L'OCR injecté reçoit un PNG, jamais le PDF lui-même.
+    const recus: Buffer[] = [];
+    const r = await ingestFile(read('sample_test_document.pdf'), 'scan.pdf', {
+      forceOcr: true,
+      ocr: async (buf) => {
+        recus.push(buf);
+        return { text: 'TEXTE OCR DE LA PAGE RENDUE', confidence: 0.9 };
+      },
+    });
+
+    expect(r.processingEngine).toBe('ocr');
+    expect(r.validationStatus).toBe('PASS');
+    expect(recus.length).toBeGreaterThan(0);
+    // Signature PNG : la preuve que l'OCR a reçu une image, pas un PDF.
+    expect(recus[0].subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    expect(recus[0].subarray(0, 5).toString()).not.toContain('%PDF');
   });
 
   it('exige une clarification si ni le natif ni l’OCR ne donnent de texte', async () => {

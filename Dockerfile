@@ -64,6 +64,17 @@ COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/tesseract.js-core \
   ./node_modules/tesseract.js-core
 
+# ─── Rasterisation PDF (cahier des charges §8) ────────────────────────────
+# Meme probleme de tracage : pdf.js charge ses polices standard depuis le
+# systeme de fichiers a l'execution, et @napi-rs/canvas s'appuie sur un binaire
+# natif .node. Sans ces deux copies, la bascule PDF -> OCR echoue et tout PDF
+# sans texte natif part en CLARIFICATION_REQUIRED.
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/pdfjs-dist \
+  ./node_modules/pdfjs-dist
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/@napi-rs \
+  ./node_modules/@napi-rs
+ENV PDFJS_STANDARD_FONTS=/app/node_modules/pdfjs-dist/standard_fonts/
+
 # Cache des modeles d'embeddings, inscriptible par l'utilisateur applicatif.
 # /app appartient a root : sans repertoire dedie inscriptible, tesseract.js ne
 # peut pas ecrire les `.traineddata` qu'il telecharge (son cachePath par

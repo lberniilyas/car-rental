@@ -24,8 +24,12 @@ import {
 import { chat, chatStructured } from '@/lib/llm/client';
 import { retrievePolicyPassages } from '@/lib/rag/retrieve';
 import { ingestFiles } from '@/lib/ingestor';
-import { INTENTS, type Intent, type KiraaState } from '@/lib/schemas/state';
-import { missingLicenseFields, partialDriverLicenseSchema } from '@/lib/schemas/extraction';
+import { INTENTS, validationSchema, type Intent, type KiraaState } from '@/lib/schemas/state';
+import {
+  detectAmbiguousDates,
+  missingLicenseFields,
+  partialDriverLicenseSchema,
+} from '@/lib/schemas/extraction';
 import { loadBookings, loadFleet, loadSeasonalRates } from './repository';
 
 export type NodeResult = Partial<KiraaState>;
@@ -110,10 +114,15 @@ export async function extractorNode(state: KiraaState): Promise<NodeResult> {
     );
   }
 
+  // Zero-Trust (§3) : une date dont l'ordre jour/mois est indecidable ne doit
+  // JAMAIS etre tranchee par le LLM. On la remonte pour clarification.
+  const ambiguousDates = [...new Set(textBlocks.flatMap((t) => detectAmbiguousDates(t)))];
+
   return {
     extractedContent: extracted,
     errors,
     escalationReasons,
+    ambiguousDates,
     graphTrace: trace(state, 'extractor_node'),
   };
 }
@@ -203,6 +212,23 @@ export async function validatorNode(state: KiraaState): Promise<NodeResult> {
     }
   }
 
+  // Zero-Trust (§3) : date ambigue -> demande de clarification, sans trancher.
+  const ambiguousDates = state.ambiguousDates ?? [];
+  if (ambiguousDates.length > 0) {
+    validationErrors.push(
+      `Date ambigue dans le document : ${ambiguousDates.join(', ')}. ` +
+        `L'ordre jour/mois est indecidable : merci de confirmer la date exacte.`,
+    );
+    return {
+      eligibilityResult: null,
+      bookingStatus: 'CLARIFICATION_REQUIRED',
+      validation: validationSchema.parse({ isValid: false, errors: validationErrors }),
+      needsHumanReview: true,
+      escalationReasons,
+      graphTrace: trace(state, 'validator_node'),
+    };
+  }
+
   // Zero-Trust : champ requis absent -> CLARIFICATION_REQUIRED, aucune invention.
   if (!birthDate || !licenseIssueDate || !licenseExpDate) {
     const missing = [
@@ -215,7 +241,8 @@ export async function validatorNode(state: KiraaState): Promise<NodeResult> {
     return {
       eligibilityResult: null,
       bookingStatus: 'CLARIFICATION_REQUIRED',
-      validation: { isValid: false, errors: validationErrors },
+      // Couche 5 : le resultat du Validator est VALIDE PAR ZOD (cahier §4).
+      validation: validationSchema.parse({ isValid: false, errors: validationErrors }),
       needsHumanReview: state.needsHumanReview || escalationReasons.length > 0,
       escalationReasons,
       graphTrace: trace(state, 'validator_node'),
@@ -239,7 +266,11 @@ export async function validatorNode(state: KiraaState): Promise<NodeResult> {
   return {
     eligibilityResult: eligibility as unknown as Record<string, unknown>,
     bookingStatus,
-    validation: { isValid: eligibility.eligible, errors: eligibility.rejectionReasons },
+    // Couche 5 : le resultat du Validator est VALIDE PAR ZOD (cahier §4).
+    validation: validationSchema.parse({
+      isValid: eligibility.eligible,
+      errors: eligibility.rejectionReasons,
+    }),
     needsHumanReview: state.needsHumanReview || escalationReasons.length > 0,
     escalationReasons,
     graphTrace: trace(state, 'validator_node'),

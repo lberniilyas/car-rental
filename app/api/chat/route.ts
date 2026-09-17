@@ -15,6 +15,7 @@ import { runAgent } from '@/lib/agent/graph';
 import { getDb } from '@/db/client';
 import { agentRequests } from '@/db/schema';
 import { generateQuotePdf } from '@/lib/reporter/pdf';
+import { chatRequestParamsSchema } from '@/lib/schemas/extraction';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -23,16 +24,37 @@ export const maxDuration = 120;
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_SIZE_MB ?? 10) * 1024 * 1024;
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.pdf', '.json', '.txt'];
 
-function parseJsonField(value: FormDataEntryValue | null): Record<string, unknown> {
-  if (typeof value !== 'string' || value.trim() === '') return {};
+/**
+ * Décode puis VALIDE par Zod les paramètres reçus (EX-02).
+ *
+ * Zero-Trust : une entrée réseau mal formée est refusée avec un motif lisible,
+ * jamais silencieusement corrigée. Les clés inconnues sont retirées par le
+ * schéma, ce qui neutralise au passage toute tentative d'injecter
+ * `intentOverride` depuis le réseau.
+ */
+function parseParams(
+  value: FormDataEntryValue | null,
+): { ok: true; params: Record<string, unknown> } | { ok: false; error: string } {
+  if (typeof value !== 'string' || value.trim() === '') return { ok: true, params: {} };
+
+  let decoded: unknown;
   try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
+    decoded = JSON.parse(value);
   } catch {
-    return {};
+    return { ok: false, error: 'Paramètres illisibles : JSON invalide.' };
   }
+  if (decoded === null || typeof decoded !== 'object' || Array.isArray(decoded)) {
+    return { ok: false, error: 'Paramètres invalides : un objet JSON est attendu.' };
+  }
+
+  const result = chatRequestParamsSchema.safeParse(decoded);
+  if (!result.success) {
+    const details = result.error.issues
+      .map((i) => `${i.path.join('.') || 'paramètres'} : ${i.message}`)
+      .join(' ; ');
+    return { ok: false, error: `Paramètres invalides — ${details}` };
+  }
+  return { ok: true, params: result.data as Record<string, unknown> };
 }
 
 export async function POST(request: Request) {
@@ -42,8 +64,13 @@ export async function POST(request: Request) {
     const formData = await request.formData();
 
     const message = String(formData.get('message') ?? '').trim();
-    const params = parseJsonField(formData.get('params'));
     const wantsPdf = String(formData.get('format') ?? '') === 'pdf';
+
+    const parsedParams = parseParams(formData.get('params'));
+    if (!parsedParams.ok) {
+      return NextResponse.json({ error: parsedParams.error }, { status: 400 });
+    }
+    const params = parsedParams.params;
 
     if (!message && formData.getAll('files').length === 0) {
       return NextResponse.json(

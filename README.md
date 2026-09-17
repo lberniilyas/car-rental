@@ -47,6 +47,8 @@ npm run rag:index      # fragmente et vectorise data/rental_policies.md
 | Application Next.js | 3000 | http://localhost:3000 | interface et API |
 | Healthcheck | 3000 | http://localhost:3000/api/health | app + PostgreSQL |
 | Exécution de l'agent | 3000 | `POST http://localhost:3000/api/chat` | multipart/form-data |
+| Catalogue de la flotte | 3000 | `GET http://localhost:3000/api/fleet` | lecture seule, alimente le sélecteur |
+| Supervision (admin) | 3000 | `GET http://localhost:3000/api/admin/requests` | **protégée par `ADMIN_TOKEN`** |
 | PostgreSQL + pgvector | **5433** | `postgresql://kiraa:…@localhost:5433/kiraa` | 5433 pour éviter tout conflit avec une installation PostgreSQL native sur 5432 |
 
 ---
@@ -54,7 +56,7 @@ npm run rag:index      # fragmente et vectorise data/rental_policies.md
 ## 2. Tests
 
 ```bash
-npm test          # suite complète (33 tests)
+npm test          # suite complète (49 tests)
 npm run test:unit # moteur déterministe + ingestion
 npm run test:e2e  # les 5 scénarios du cahier des charges
 npm run typecheck # vérification TypeScript stricte
@@ -63,7 +65,8 @@ npm run typecheck # vérification TypeScript stricte
 | Suite | Contenu |
 |---|---|
 | `tests/unit/engine.test.ts` | 14 assertions de **parité** avec le notebook Python de référence |
-| `tests/unit/ingestor.test.ts` | ingestion réelle des fichiers de `samples/`, OCR tesseract réel |
+| `tests/unit/ingestor.test.ts` | ingestion réelle des fichiers de `samples/`, OCR tesseract réel, rasterisation PDF |
+| `tests/unit/schemas.test.ts` | contrats Zod appliqués **à l'exécution**, dates ambiguës, éligibilité à la date de prise en charge |
 | `tests/e2e/scenarios.test.ts` | les 5 scénarios, exécutés à travers le **vrai** graphe LangGraph.js |
 
 Les tests E2E vérifient l'état partagé persistant : `bookingStatus`, `needsHumanReview`,
@@ -144,7 +147,8 @@ kilomètre supplémentaire) sont portées **verbatim** depuis le notebook, dans
 |---|---|
 | Fichier hors sujet ou corrompu | rejet, demande d'un nouveau fichier |
 | Champ obligatoire absent | `CLARIFICATION_REQUIRED` — **jamais** de valeur inventée |
-| Date ambiguë | demande de clarification |
+| Paramètre réseau mal formé | **400** avec motif ; jamais corrigé en silence (`chatRequestParamsSchema`) |
+| Date ambiguë | `CLARIFICATION_REQUIRED` — `detectAmbiguousDates()` repère `01/09/2023`, dont l'ordre jour/mois est indécidable, et refuse de trancher |
 | Conflit formulaire / document / message | confirmation humaine requise |
 | Extraction sous le seuil de confiance | revue humaine |
 
@@ -162,16 +166,32 @@ kilomètre supplémentaire) sont portées **verbatim** depuis le notebook, dans
 Pour chaque fichier, l'interface affiche : nom, type, statut de validation, moteur
 utilisé, contenu extrait, score de confiance, erreurs et statut de revue humaine.
 
+### Rasterisation PDF — bascule OCR complète
+
+Conformément au §8 du cahier des charges, un PDF dont le texte natif est insuffisant est
+**rendu en image puis soumis à l'OCR** ([`lib/ingestor/rasterize.ts`](lib/ingestor/rasterize.ts)) :
+`pdf.js` dessine chaque page sur un canvas natif (`@napi-rs/canvas`), et le PNG obtenu part
+au pipeline tesseract. Trois pages au maximum ; la confiance retenue est la plus faible du
+lot (principe du maillon faible).
+
+C'est aussi ce qui rend la bascule **sûre**. `tesseract.js` ne sait pas lire un PDF : il
+lève alors une erreur asynchrone rethrow-ée dans `process.nextTick`, qui échappe à tout
+`try/catch` et **termine le processus Node**. En rasterisant en amont, tesseract ne reçoit
+jamais qu'une image matricielle. Un test le vérifie en contrôlant la signature PNG du
+buffer transmis à l'OCR.
+
+> **`PDFJS_STANDARD_FONTS` est indispensable.** Sans les polices standard de `pdf.js`, les
+> caractères des polices non embarquées sont ignorés silencieusement : l'image produite est
+> visuellement vide et l'OCR ne renvoie rien. Le `Dockerfile` recopie `pdfjs-dist` et
+> `@napi-rs/canvas` dans l'image, car la sortie `standalone` de Next.js ne les trace pas.
+
 ### Limites connues
 
-- **Rasterisation PDF non implémentée.** `tesseract.js` ne sait pas lire un PDF : il
-  attend une image matricielle. Un PDF **sans texte natif exploitable** est donc placé en
-  `CLARIFICATION_REQUIRED` avec un message explicite, au lieu d'être envoyé à un OCR qui
-  échouerait. Les PDF contenant du texte (cas courant) sont traités nativement.
-  Un OCR alternatif capable de lire un PDF peut être injecté via `IngestOptions.ocr`.
 - **PDF à table XRef malformée.** `pdf.js` peut échouer au premier appel d'un processus ;
   `extractPdfNative()` réessaie jusqu'à 4 fois, ce qui couvre le cas observé sur
   `samples/sample_test_document.pdf`.
+- **PDF chiffré ou corrompu.** Ni lisible nativement, ni rendable en image : placé en
+  `CLARIFICATION_REQUIRED` avec un message explicite, sans qu'aucun champ ne soit inventé.
 
 ---
 
@@ -191,7 +211,7 @@ Copier `.env.example` vers `.env.local` (ignoré par git) et renseigner les vale
 | `EMBEDDINGS_DIMENSION` | dimension des vecteurs | `384` |
 | `MAX_UPLOAD_SIZE_MB` | limite de téléversement | `10` |
 | `OCR_CONFIDENCE_THRESHOLD` | seuil HITL | `0.85` |
-| `ADMIN_TOKEN` | protection des routes d'administration | _(vide)_ |
+| `ADMIN_TOKEN` | protège `GET /api/admin/requests` — route **désactivée** si vide | _(vide)_ |
 
 ### Embeddings — modèle, dimension et stratégie
 
@@ -218,8 +238,16 @@ Copier `.env.example` vers `.env.local` (ignoré par git) et renseigner les vale
 - `/api/health` ne divulgue ni hôte, ni identifiants : en cas d'échec il renvoie un motif
   générique et un code **503**.
 - Téléversements limités par taille (`MAX_UPLOAD_SIZE_MB`) et par extension.
-- `intentOverride` (forçage d'intention) est **ignoré** par la route `/api/chat` : il
-  n'existe que pour les tests E2E déterministes.
+- `intentOverride` (forçage d'intention) ne peut pas être injecté depuis le réseau : le
+  schéma Zod `chatRequestParamsSchema` **retire toute clé inconnue** avant que les
+  paramètres n'atteignent le graphe. Ce champ n'existe que pour les tests E2E déterministes.
+- Les paramètres reçus par `/api/chat` sont **validés par Zod** : une date mal formée ou
+  une option hors barème est refusée en **400** avec un motif lisible, jamais convertie
+  silencieusement en `null`.
+- `GET /api/admin/requests` est protégée par `ADMIN_TOKEN`, comparé en **temps constant**.
+  Si la variable n'est pas configurée, la route est **désactivée (503)** : une variable
+  absente ne vaut jamais autorisation. La réponse ne contient ni `rawInput`, ni
+  `finalState`, ni aucune donnée client — uniquement des métadonnées de supervision.
 
 ---
 
@@ -460,7 +488,7 @@ tests/                  Vitest — unitaires et E2E
 Le nom du dépôt et le format de remise sont communiqués par l'encadrement
 (cahier des charges §9). Renseigner ici le nom retenu par le groupe avant la remise :
 
-- **Dépôt** : `<à compléter>`
+- **Dépôt** : `car-rental` — https://github.com/lberniilyas/car-rental
 - **Groupe** : `<à compléter>`
 
 ---
@@ -470,7 +498,7 @@ Le nom du dépôt et le format de remise sont communiqués par l'encadrement
 | Élément | État |
 |---|---|
 | Moteur déterministe — parité notebook | ✅ 14/14 assertions |
-| Tests unitaires + E2E | ✅ 33/33 |
+| Tests unitaires + E2E | ✅ 49/49 |
 | Scénarios du cahier des charges | ✅ 5/5 |
 | TypeScript strict | ✅ aucune erreur |
 | PostgreSQL + pgvector | ✅ opérationnel |

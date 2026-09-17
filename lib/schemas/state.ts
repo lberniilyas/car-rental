@@ -85,6 +85,11 @@ export const kiraaStateSchema = z.object({
   needsHumanReview: z.boolean(),
   escalationReasons: z.array(z.string()),
   errors: z.array(z.string()),
+  /**
+   * Dates numeriques dont l'ordre jour/mois est indecidable dans les documents
+   * recus. Alimente le controle Zero-Trust « date ambigue -> clarification ».
+   */
+  ambiguousDates: z.array(z.string()),
   explanation: z.string(),
   report: z.record(z.unknown()).nullable(),
   graphTrace: z.array(z.string()),
@@ -121,6 +126,7 @@ export function makeInitialState(
     needsHumanReview: false,
     escalationReasons: [],
     errors: [],
+    ambiguousDates: [],
     explanation: '',
     report: null,
     graphTrace: [],

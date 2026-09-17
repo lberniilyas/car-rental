@@ -52,6 +52,7 @@ const channels: StateGraphArgs<KiraaState>['channels'] = {
   needsHumanReview: { value: (_x: boolean, y: boolean) => y, default: () => false },
   escalationReasons: { value: (_x, y) => y, default: () => [] },
   errors: { value: (_x, y) => y, default: () => [] },
+  ambiguousDates: { value: (_x, y) => y, default: () => [] },
   explanation: { value: (_x: string, y: string) => y, default: () => '' },
   report: { value: (_x, y) => y, default: () => null },
   graphTrace: { value: (_x, y) => y, default: () => [] },

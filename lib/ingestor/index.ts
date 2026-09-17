@@ -15,6 +15,8 @@
 import path from 'node:path';
 import { OCR_CONFIDENCE_THRESHOLD } from '@/lib/engine/constants';
 import type { IngestedFile } from '@/lib/schemas/state';
+import { uploadedJsonSchema } from '@/lib/schemas/extraction';
+import { rasterizePdf } from './rasterize';
 
 /**
  * En deçà de ce nombre de caractères exploitables, le texte natif d'un PDF est
@@ -87,14 +89,13 @@ async function extractPdfNative(buffer: Buffer): Promise<string> {
 }
 
 /**
- * tesseract.js ne sait PAS lire un PDF : il attend une image matricielle.
- * Sans etape de rasterisation, un PDF sans texte natif ne peut donc pas
- * partir en OCR. On le signale explicitement plutot que de laisser remonter
- * une erreur opaque du worker.
+ * Message de repli lorsque la chaine « rasterisation -> OCR » echoue elle-meme
+ * (PDF corrompu, chiffre, ou sans page rendable). Zero-Trust : on demande un
+ * nouveau document plutot que de renvoyer un contenu partiel ou invente.
  */
 const PDF_OCR_UNAVAILABLE =
-  'PDF sans texte natif exploitable. La conversion PDF vers image (rasterisation) ' +
-  "n'est pas disponible : merci de fournir une capture d'ecran ou une photo du document.";
+  'PDF illisible : ni texte natif exploitable, ni conversion en image possible. ' +
+  "Merci de fournir un document lisible, une capture d'ecran ou une photo.";
 
 // ─── OCR ───────────────────────────────────────────────────────────────────
 
@@ -133,6 +134,12 @@ export interface IngestOptions {
   ocr?: (buffer: Buffer) => Promise<{ text: string; confidence: number }>;
   /** Permet de désactiver l'OCR quand seule l'extraction native est voulue. */
   enableOcr?: boolean;
+  /**
+   * Force la bascule « rasterisation -> OCR » d'un PDF même lorsque son texte
+   * natif suffirait. Réservé aux tests : la production privilégie toujours
+   * l'extraction native, moins coûteuse et sans perte.
+   */
+  forceOcr?: boolean;
 }
 
 export async function ingestFile(
@@ -174,14 +181,20 @@ export async function ingestFile(
           result.humanReviewStatus = 'REQUIRED';
           return result;
         }
-        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        // Cahier des charges §8 : le JSON est chargé ET VALIDÉ PAR ZOD.
+        const validated = uploadedJsonSchema.safeParse(parsed);
+        if (!validated.success) {
           result.validationStatus = 'CLARIFICATION_REQUIRED';
-          result.errors.push('JSON valide mais ne décrit pas un objet de données exploitable.');
+          result.errors.push(
+            `JSON valide mais ne décrit pas un objet de données exploitable : ${validated.error.issues
+              .map((i) => i.message)
+              .join(' ; ')}`,
+          );
           result.humanReviewStatus = 'REQUIRED';
           return result;
         }
         result.processingEngine = 'json_parser';
-        result.structuredContent = parsed as Record<string, unknown>;
+        result.structuredContent = validated.data;
         result.extractedText = raw;
         result.confidence = 1.0;
         result.validationStatus = 'PASS';
@@ -213,7 +226,11 @@ export async function ingestFile(
         }
 
         const usable = nativeText.trim();
-        if (usable.length >= MIN_NATIVE_PDF_CHARS && printableRatio(usable) > 0.8) {
+        if (
+          !options.forceOcr &&
+          usable.length >= MIN_NATIVE_PDF_CHARS &&
+          printableRatio(usable) > 0.8
+        ) {
           // Texte natif suffisant : l'OCR n'est pas nécessaire.
           result.processingEngine = 'native_pdf';
           result.extractedText = nativeText;
@@ -233,25 +250,23 @@ export async function ingestFile(
           return result;
         }
 
-        // Bascule OCR : le PDF serait traité comme une image.
+        // Bascule OCR (§8) : « le PDF est traité comme une image et envoyé au
+        // pipeline OCR ». La rasterisation est OBLIGATOIRE avant l'OCR.
         //
-        // IMPORTANT : on ne transmet JAMAIS un PDF a tesseract.js par defaut.
-        // Son worker leve alors une erreur asynchrone rethrow-ee dans
-        // process.nextTick ("Pdf reading is not supported"), qui echappe a
-        // tout try/catch et termine le processus Node. Seul un OCR injecte
-        // (API Vision, pipeline avec rasterisation) peut traiter un PDF.
-        if (!options.ocr) {
-          result.validationStatus = 'CLARIFICATION_REQUIRED';
-          result.errors.push(
-            nativeError ? `${PDF_OCR_UNAVAILABLE} (${nativeError})` : PDF_OCR_UNAVAILABLE,
-          );
-          result.humanReviewStatus = 'REQUIRED';
-          return result;
-        }
-
+        // On ne transmet JAMAIS un PDF a tesseract.js : son worker leve alors
+        // une erreur asynchrone rethrow-ee dans process.nextTick ("Pdf reading
+        // is not supported") qui echappe a tout try/catch et termine le
+        // processus Node. Rasteriser en amont supprime ce danger a la racine :
+        // tesseract ne recoit que des PNG.
         let ocrResult: { text: string; confidence: number };
         try {
-          ocrResult = await ocr(buffer);
+          const pages = await rasterizePdf(buffer);
+          const rendered = await Promise.all(pages.map((page) => ocr(page)));
+          ocrResult = {
+            text: rendered.map((r) => r.text).join('\n\n'),
+            // Principe du maillon faible, comme pour un lot de fichiers.
+            confidence: Math.min(...rendered.map((r) => r.confidence)),
+          };
         } catch (e) {
           result.validationStatus = 'CLARIFICATION_REQUIRED';
           result.errors.push(

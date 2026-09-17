@@ -16,24 +16,22 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { INSURANCE_OPTIONS } from '@/lib/engine/constants';
+import type { IngestedFile, RagPassage } from '@/lib/schemas/state';
+import type { FleetOption } from '@/lib/schemas/fleet';
 
-interface IngestedFileView {
-  filename: string;
-  fileType: string;
-  sizeBytes: number;
-  validationStatus: string;
-  processingEngine: string;
-  confidence: number;
-  errors: string[];
-  humanReviewStatus: string;
+/**
+ * Les contrats viennent des schémas Zod partagés, jamais d'une redéclaration
+ * locale : une divergence entre l'API et l'interface casse la compilation.
+ *
+ * Seul écart assumé : la route `/api/chat` tronque `extractedText` à 400
+ * caractères et le republie sous `extractedPreview`, ce qui se modélise ici par
+ * une substitution de champ sur le contrat d'origine.
+ */
+type IngestedFileView = Omit<IngestedFile, 'extractedText' | 'structuredContent'> & {
   extractedPreview: string;
-}
+};
 
-interface RagPassageView {
-  content: string;
-  similarity: number;
-  sourceSection: string | null;
-}
+type RagPassageView = RagPassage;
 
 interface AgentResponse {
   requestId: string;
@@ -52,16 +50,6 @@ interface AgentResponse {
   graphTrace: string[];
   errors: string[];
   error?: string;
-}
-
-interface VehicleOption {
-  vehicleId: string;
-  label: string;
-  category: string;
-  baseDailyRate: number;
-  transmission: string;
-  location: string;
-  vehiclesAvailable: number;
 }
 
 /** Libellés clients des statuts — jamais le code brut à l'écran. */
@@ -181,7 +169,7 @@ export default function ChatUI() {
   const [message, setMessage] = useState('');
   const [files, setFiles] = useState<FileList | null>(null);
 
-  const [fleet, setFleet] = useState<VehicleOption[]>([]);
+  const [fleet, setFleet] = useState<FleetOption[]>([]);
   const [fleetError, setFleetError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -191,13 +179,13 @@ export default function ChatUI() {
   useEffect(() => {
     fetch('/api/fleet')
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((d: { vehicles: VehicleOption[] }) => setFleet(d.vehicles))
+      .then((d: { vehicles: FleetOption[] }) => setFleet(d.vehicles))
       .catch(() => setFleetError('Catalogue des véhicules momentanément indisponible.'));
   }, []);
 
   /** Véhicules groupés par catégorie pour le sélecteur. */
   const fleetByCategory = useMemo(() => {
-    const groups = new Map<string, VehicleOption[]>();
+    const groups = new Map<string, FleetOption[]>();
     for (const v of fleet) {
       const list = groups.get(v.category) ?? [];
       list.push(v);
@@ -237,6 +225,11 @@ export default function ChatUI() {
       params.startDate = startDate;
       // Le coefficient saisonnier dépend du mois de prise en charge.
       params.month = Number(startDate.slice(5, 7));
+      // L'éligibilité s'apprécie au JOUR DE LA PRISE EN CHARGE : c'est la date
+      // à laquelle le conducteur prend le volant. Sans cela, un permis expirant
+      // entre aujourd'hui et le départ serait accepté à tort (cahier §4 :
+      // « Permis expiré -> blocage immédiat »).
+      params.referenceDate = startDate;
     }
     if (endDate) params.endDate = endDate;
     if (days !== null) params.days = days;
@@ -313,6 +306,7 @@ export default function ChatUI() {
   const price = result?.price as Record<string, unknown> | null;
   const eligibility = result?.eligibility as Record<string, unknown> | null;
   const mileage = price?.mileage as Record<string, unknown> | undefined;
+  const availability = result?.availability as Record<string, unknown> | null;
 
   // Le sous-total du moteur inclut déjà l'assurance : on isole la part location
   // pour que les lignes affichées s'additionnent réellement jusqu'au total.
@@ -581,6 +575,49 @@ export default function ChatUI() {
               </div>
             )}
           </Section>
+
+          {/* ─── Disponibilite, issue de PostgreSQL ─────────────────────── */}
+          {availability && (
+            <Section title="Disponibilité du véhicule">
+              <div
+                className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                  availability.available
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                    : 'border-rose-300 bg-rose-50 text-rose-900'
+                }`}
+              >
+                {availability.available
+                  ? 'Ce véhicule est disponible sur la période demandée.'
+                  : 'Ce véhicule n’est pas disponible sur la période demandée.'}
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+                <div>
+                  <dt className="text-slate-500">Du</dt>
+                  <dd className="font-medium">{String(availability.requestedStart ?? '—')}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Au</dt>
+                  <dd className="font-medium">{String(availability.requestedEnd ?? '—')}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Réservations en conflit</dt>
+                  <dd className="font-medium">{String(availability.conflictingBookings ?? 0)}</dd>
+                </div>
+              </dl>
+              {Array.isArray(availability.substitutes) && availability.substitutes.length > 0 && (
+                <div className="mt-3 text-sm">
+                  <p className="text-slate-500">Véhicules équivalents proposés</p>
+                  <ul className="mt-1 list-inside list-disc">
+                    {(availability.substitutes as unknown[]).map((sub, i) => (
+                      <li key={i}>
+                        {typeof sub === 'string' ? sub : JSON.stringify(sub)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </Section>
+          )}
 
           {/* ─── Éligibilité ────────────────────────────────────────────── */}
           {eligibility && (

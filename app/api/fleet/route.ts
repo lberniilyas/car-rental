@@ -11,6 +11,7 @@
 
 import { NextResponse } from 'next/server';
 import { loadFleet } from '@/lib/agent/repository';
+import { fleetResponseSchema } from '@/lib/schemas/fleet';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -34,7 +35,9 @@ export async function GET() {
           a.category.localeCompare(b.category) || a.baseDailyRate - b.baseDailyRate,
       );
 
-    return NextResponse.json({ vehicles });
+    // Le contrat partagé est appliqué À LA SORTIE : l'API ne peut pas publier
+    // une forme que l'interface n'attend pas.
+    return NextResponse.json(fleetResponseSchema.parse({ vehicles }));
   } catch (e) {
     console.error('[fleet] lecture impossible :', (e as Error).message);
     return NextResponse.json({ error: 'Catalogue indisponible.' }, { status: 503 });
