@@ -12,6 +12,11 @@ const nextConfig = {
       'pdf-parse',
       'tesseract.js',
       'pdfkit',
+      // Rasterisation PDF (§8). @napi-rs/canvas embarque un binaire natif
+      // `skia.*.node` que webpack ne sait pas parser : sans cette ligne, le
+      // build echoue sur « Module parse failed: Unexpected character ».
+      '@napi-rs/canvas',
+      'pdfjs-dist',
     ],
     serverActions: { bodySizeLimit: '12mb' },
   },
